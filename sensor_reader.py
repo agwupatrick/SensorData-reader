@@ -5,37 +5,45 @@ import json
 import httpx
 import asyncio
 
-# Replace `your_fastapi_url` with the actual endpoint URL for your FastAPI app
-FASTAPI_URL = "http://localhost:8000/sensor/"
+FASTAPI_URL = "https://esmarthomeapi.onrender.com/sensor/"
 
 class SensorReader:
-    @classmethod
-    def read_serial(cls, comport, baudrate):
-        ser = serial.Serial(comport, baudrate, timeout=0.1)
+    def __init__(self, comport, baudrate):
+        self.comport = comport
+        self.baudrate = baudrate
+        self.ser = serial.Serial(comport, baudrate, timeout=0.1)
+    
+    async def read_serial(self):
+        buffer = ""
         while True:
-            data = ser.readline().decode().strip()
-            if data:
-                try:
-                    # Parse JSON data
-                    parsed_data = json.loads(data)
-                    print(f'Received data: {parsed_data}')
-                    # Call the async store_data function
-                    asyncio.run(cls.store_data(parsed_data))
-                except json.JSONDecodeError:
-                    print(f"Invalid data format: {data}")
+            try:
+                # Read data from serial
+                buffer += self.ser.readline().decode().strip()
+                # Try to parse the data as JSON if we have a complete line
+                if buffer:
+                    try:
+                        parsed_data = json.loads(buffer)
+                        print(f'Received data: {parsed_data}')
+                        # Store parsed data and clear buffer
+                        await self.store_data(parsed_data)
+                        buffer = ""  # Reset buffer after successful parsing
+                    except json.JSONDecodeError:
+                        # Incomplete or invalid JSON, skip this iteration
+                        print(f"Incomplete or invalid data, buffering: {buffer}")
+            except Exception as e:
+                print(f"Error reading serial data: {e}")
+                break  # Exit if an error occurs
 
-    @staticmethod
-    async def store_data(parsed_data):
+    async def store_data(self, parsed_data):
         async with httpx.AsyncClient() as client:
-            # Convert device_id to a UUID if necessary
-            device_id = "d484db62-5506-496d-b70c-f6a2d1f3eb7c"  # Replace with actual device ID
+            # Ensure valid UUID for device_id
+            device_id = "d484db62-5506-496d-b70c-f6a2d1f3eb7c"
             try:
                 device_id = uuid.UUID(device_id)
             except ValueError:
                 print(f"Invalid UUID format for device_id: {device_id}")
                 return
             
-            # Extract sensor data from the parsed JSON
             sensor_data = {
                 "device_id": str(device_id),
                 "mq5_level": parsed_data.get("gas_value"),
@@ -53,10 +61,11 @@ class SensorReader:
             except httpx.HTTPError as e:
                 print(f"HTTP error occurred: {e}")
 
-def start_sensor_reading():
+async def main():
     comport = 'COM8'  # Replace with the correct port
     baudrate = 9600  # Replace with the correct baud rate
-    SensorReader.read_serial(comport, baudrate)
+    sensor_reader = SensorReader(comport, baudrate)
+    await sensor_reader.read_serial()
 
 if __name__ == "__main__":
-    start_sensor_reading()
+    asyncio.run(main())
